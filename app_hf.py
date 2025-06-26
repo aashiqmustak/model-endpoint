@@ -1,6 +1,5 @@
 from flask import Flask, request, jsonify
-from transformers import AutoModelForCausalLM, AutoTokenizer
-from peft import PeftModel, PeftConfig
+from transformers import AutoTokenizer, AutoModelForCausalLM
 import torch
 import os
 import json
@@ -8,46 +7,28 @@ import re
 from datetime import datetime
 from pyngrok import ngrok
 
+# Initialize Flask app
 app = Flask(__name__)
-os.makedirs("offload_dir", exist_ok=True)
 
-# Model & Adapter paths
+# Load model and tokenizer
 base_model_id = "aashiqmustak/intent-entity"
+adapter_path = None
+model_loaded = False
 
-
-# Global storage for the latest output
-latest_llm_output = {}
-
-# Load model
 try:
-    print("Loading tokenizer...")
+    print("Loading model and tokenizer...")
+    model = AutoModelForCausalLM.from_pretrained(base_model_id)
     tokenizer = AutoTokenizer.from_pretrained(base_model_id)
-
-    print("Loading base model...")
-    config = PeftConfig.from_pretrained(adapter_path)
-    base_model = AutoModelForCausalLM.from_pretrained(
-        base_model_id,
-        torch_dtype=torch.float16,
-        device_map="auto"
-    )
-
-    print("Loading LoRA adapter...")
-    model = PeftModel.from_pretrained(
-        base_model,
-        adapter_path,
-        device_map="auto",
-        offload_folder="offload_dir"
-    )
-
     model.eval()
     model_loaded = True
-    print("Model loaded successfully!")
-
+    print("Model loaded successfully.")
 except Exception as e:
-    print(f"Error loading model: {e}")
-    tokenizer = None
+    print(f"Failed to load model: {str(e)}")
     model = None
-    model_loaded = False
+    tokenizer = None
+
+# Global variable for storing the last LLM output
+latest_llm_output = {}
 
 # Expected response schema
 expected_structure = {
@@ -85,8 +66,8 @@ def generate_response(instruction: str, input_text: str = "", max_new_tokens=150
             outputs = model.generate(
                 **inputs,
                 max_new_tokens=max_new_tokens,
-                do_sample=True,              # Enable sampling
-                temperature=0.7,             # Now effective
+                do_sample=True,
+                temperature=0.7,
                 repetition_penalty=1.1,
                 pad_token_id=tokenizer.eos_token_id
             )
@@ -94,13 +75,13 @@ def generate_response(instruction: str, input_text: str = "", max_new_tokens=150
         full_output = tokenizer.decode(outputs[0], skip_special_tokens=True)
         result = full_output.split("Output:")[-1].strip() if "Output:" in full_output else full_output.strip()
 
-        # Attempt to parse JSON
+        # Try to extract JSON
         try:
             json_match = re.search(r'\{.*\}', result, re.DOTALL)
             if json_match:
                 parsed = json.loads(json_match.group(0))
                 return fill_defaults(parsed)
-        except:
+        except Exception:
             pass
 
         return {"extracted_text": result, "raw_output": result}
@@ -122,14 +103,12 @@ def generate_json_response(input_text: str):
     )
     return generate_response(instruction, input_text)
 
-# Flask routes
-
+# Routes
 @app.route('/slack-input', methods=['POST'])
 def slack_input():
     try:
         data = request.get_json()
         message = data.get("text", "")
-
         if not message:
             return jsonify({"error": "No message provided"}), 400
 
@@ -190,20 +169,9 @@ def test_endpoint():
         "status": "Model working correctly"
     })
 
-# Main runner
+# Start Flask + ngrok
 if __name__ == '__main__':
-    print("Starting Flask server...")
-    print(f"Model loaded: {model_loaded}")
-    if model_loaded:
-        print(f"Base model: {base_model_id}")
-        print(f"Adapter: {adapter_path}")
-
     port = 5000
-    try:
-        public_url = ngrok.connect(port)
-        print(f" * ngrok tunnel available at: {public_url}")
-        print(f" * Test endpoints: {public_url}/test or /slack-input")
-    except Exception as e:
-        print(f" * ngrok failed: {str(e)}")
-
+    public_url = ngrok.connect(port)
+    print(f" * ngrok tunnel URL: {public_url}")
     app.run(port=port)
