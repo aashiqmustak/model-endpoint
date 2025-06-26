@@ -143,31 +143,6 @@ def generate():
     result = generate_response(instruction, input_text)
     return jsonify({"output": result})
 
-@app.route('/health', methods=['GET'])
-def health_check():
-    return jsonify({
-        "status": "running",
-        "model_loaded": model_loaded,
-        "base_model": base_model_id,
-        "adapter_path": adapter_path,
-        "device": str(model.device) if model_loaded else "unknown",
-        "torch_version": torch.__version__,
-        "cuda_available": torch.cuda.is_available()
-    })
-
-@app.route('/test', methods=['GET'])
-def test_endpoint():
-    if not model_loaded:
-        return jsonify({"error": "Model not loaded"}), 500
-
-    test_message = "I want to hire a Frontend Developer with 4 years of experience"
-    result = generate_json_response(test_message)
-
-    return jsonify({
-        "test_input": test_message,
-        "test_output": result,
-        "status": "Model working correctly"
-    })
 
 # Start Flask + ngrok
 if __name__ == '__main__':
